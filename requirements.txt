@@ -6,3 +6,4 @@ scikit-image==0.22.0
 scikit-learn==1.4.1
 matplotlib==3.8.3
 Werkzeug==3.0.1 
+gunicorn==23.0.0
