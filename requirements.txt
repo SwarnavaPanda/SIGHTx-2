@@ -1,0 +1,8 @@
+flask==3.0.2
+numpy==1.26.4
+Pillow==10.2.0
+opencv-python==4.9.0.80
+scikit-image==0.22.0
+scikit-learn==1.4.1
+matplotlib==3.8.3
+Werkzeug==3.0.1 

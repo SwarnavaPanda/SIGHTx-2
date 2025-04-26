@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Segmentation Results</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .results-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 25px;
+            margin: 20px 0;
+        }
+        .result-section {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .result-section:hover {
+            transform: translateY(-5px);
+        }
+        .image-container {
+            margin: 15px 0;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        .metrics {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid #007bff;
+        }
+        .metrics p {
+            margin: 8px 0;
+            font-size: 0.95em;
+        }
+        .best-method {
+            color: #28a745;
+            font-weight: bold;
+            font-size: 1.1em;
+            padding: 10px;
+            background-color: #e8f5e9;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .back-button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            margin-top: 20px;
+            transition: background-color 0.3s ease;
+            font-weight: 500;
+        }
+        .back-button:hover {
+            background-color: #0056b3;
+            text-decoration: none;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.2em;
+        }
+        h2 {
+            color: #34495e;
+            margin-bottom: 15px;
+            font-size: 1.4em;
+        }
+        .cluster-info {
+            background-color: #e3f2fd;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-size: 0.9em;
+        }
+        .patch-customizer {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+        .patch-customizer form {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .patch-customizer input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100px;
+        }
+        .patch-customizer button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .patch-customizer button:hover {
+            background-color: #0056b3;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>Segmentation Results</h1>
+    
+    <div class="patch-customizer">
+        <h2>Customize Patch Size</h2>
+        <form id="patchForm">
+            <input type="hidden" id="filename" value="{{ original_image }}">
+            <label for="patchSize">Patch Size:</label>
+            <input type="number" id="patchSize" name="patch_size" value="{{ patch_size }}" min="8" max="256" step="8">
+            <button type="submit">Update Results</button>
+        </form>
+    </div>
+
+    <div class="loading" id="loading">
+        <div class="loading-spinner"></div>
+        <p>Processing image with new patch size...</p>
+    </div>
+    
+    <div class="results-container">
+        <div class="result-section">
+            <h2>Original Image</h2>
+            <div class="image-container">
+                <img src="{{ url_for('uploaded_file', filename=original_image) }}" alt="Original Image">
+            </div>
+            <p>Current Patch Size: <span id="currentPatchSize">{{ patch_size }}</span>x<span id="currentPatchSize2">{{ patch_size }}</span> pixels</p>
+        </div>
+        
+        <div class="result-section">
+            <h2>K-means Clustering</h2>
+            <div class="image-container">
+                <img src="{{ url_for('static', filename='results/' + kmeans_image) }}" alt="K-means Result" id="kmeansImage">
+            </div>
+            <div class="cluster-info">
+                Optimal Number of Clusters: <span id="optimalK">{{ optimal_k }}</span>
+            </div>
+            <div class="metrics">
+                <p>MSE: <span id="kmeansMSE">{{ "%.2f"|format(kmeans_metrics[0]) }}</span></p>
+                <p>PSNR: <span id="kmeansPSNR">{{ "%.2f"|format(kmeans_metrics[1]) }}</span> dB</p>
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <h2>Multi-Otsu Thresholding</h2>
+            <div class="image-container">
+                <img src="{{ url_for('static', filename='results/' + multiotsu_image) }}" alt="Multi-Otsu Result" id="multiotsuImage">
+            </div>
+            <div class="metrics">
+                <p>MSE: <span id="multiotsuMSE">{{ "%.2f"|format(multiotsu_metrics[0]) }}</span></p>
+                <p>PSNR: <span id="multiotsuPSNR">{{ "%.2f"|format(multiotsu_metrics[1]) }}</span> dB</p>
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <h2>Traditional Thresholding</h2>
+            <div class="image-container">
+                <img src="{{ url_for('static', filename='results/' + threshold_image) }}" alt="Threshold Result" id="thresholdImage">
+            </div>
+            <div class="metrics">
+                <p>MSE: <span id="thresholdMSE">{{ "%.2f"|format(threshold_metrics[0]) }}</span></p>
+                <p>PSNR: <span id="thresholdPSNR">{{ "%.2f"|format(threshold_metrics[1]) }}</span> dB</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="result-section">
+        <h2>Best Performing Method</h2>
+        <p class="best-method" id="bestMethod">{{ best_method }} (PSNR: {{ "%.2f"|format(best_psnr) }} dB)</p>
+    </div>
+    
+    <div style="text-align: center;">
+        <a href="/" class="back-button">Process Another Image</a>
+    </div>
+
+    <script>
+        document.getElementById('patchForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const loading = document.getElementById('loading');
+            loading.style.display = 'block';
+            
+            const formData = new FormData(this);
+            formData.append('filename', document.getElementById('filename').value);
+            
+            fetch('/process_with_custom_patch', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+                
+                // Update metrics
+                document.getElementById('optimalK').textContent = data.optimal_k;
+                document.getElementById('kmeansMSE').textContent = data.kmeans_metrics[0].toFixed(2);
+                document.getElementById('kmeansPSNR').textContent = data.kmeans_metrics[1].toFixed(2);
+                document.getElementById('multiotsuMSE').textContent = data.multiotsu_metrics[0].toFixed(2);
+                document.getElementById('multiotsuPSNR').textContent = data.multiotsu_metrics[1].toFixed(2);
+                document.getElementById('thresholdMSE').textContent = data.threshold_metrics[0].toFixed(2);
+                document.getElementById('thresholdPSNR').textContent = data.threshold_metrics[1].toFixed(2);
+                document.getElementById('bestMethod').textContent = `${data.best_method} (PSNR: ${data.best_psnr.toFixed(2)} dB)`;
+                
+                // Update current patch size
+                const patchSize = document.getElementById('patchSize').value;
+                document.getElementById('currentPatchSize').textContent = patchSize;
+                document.getElementById('currentPatchSize2').textContent = patchSize;
+                
+                // Force image refresh
+                const timestamp = new Date().getTime();
+                document.getElementById('kmeansImage').src = `/static/results/kmeans_result.jpg?t=${timestamp}`;
+                document.getElementById('multiotsuImage').src = `/static/results/multiotsu_result.jpg?t=${timestamp}`;
+                document.getElementById('thresholdImage').src = `/static/results/threshold_result.jpg?t=${timestamp}`;
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            })
+            .finally(() => {
+                loading.style.display = 'none';
+            });
+        });
+    </script>
+</body>
+</html> 
