@@ -7,7 +7,6 @@ from skimage.filters import threshold_multiotsu
 from skimage.util import view_as_blocks
 from sklearn.cluster import KMeans
 from sklearn.metrics import calinski_harabasz_score
-import matplotlib.pyplot as plt
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -17,6 +16,7 @@ app.config['RESULTS_FOLDER'] = 'static/results'
 # Create necessary directories
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'tif', 'tiff'}
@@ -29,6 +29,7 @@ def convert_tiff_to_jpg(image_path):
         return jpg_path
     return image_path
 
+optimal_cluster_number = 0
 def find_optimal_clusters(data, max_clusters=10):
     # Ensure we have enough samples for clustering
     n_samples = len(data)
@@ -48,6 +49,7 @@ def find_optimal_clusters(data, max_clusters=10):
         scores.append(score)
     
     optimal_k = np.argmax(scores) + 2  # +2 because we started from k=2
+    optimal_cluster_number = optimal_k
     return optimal_k
 
 def adaptive_patch_size(image):
@@ -99,6 +101,41 @@ def find_optimal_patches(image):
     
     return patch_size
 
+
+
+#generate a colorized image from the segmented image
+# This function assigns a unique color to each cluster in the segmented image
+# and returns a colorized image.
+def colorize_clusters(segmented, num_clusters=optimal_cluster_number):
+    """
+    Assigns a unique color to each cluster in the segmented image.
+    
+    Parameters:
+        segmented (numpy.ndarray): The segmented image with cluster labels.
+        num_clusters (int): The number of clusters.
+    
+    Returns:
+        numpy.ndarray: A colorized image with each cluster assigned a unique color.
+    """
+    # Create a colormap (e.g., using matplotlib or manually define colors)
+    import matplotlib.pyplot as plt
+    colormap = plt.cm.get_cmap('tab10', num_clusters)  # Use a colormap with `num_clusters` colors
+    
+    # Create an RGB image
+    height, width = segmented.shape
+    colorized_image = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    for cluster_id in range(num_clusters):
+        # Get the color for the current cluster
+        color = (np.array(colormap(cluster_id)[:3]) * 255).astype(np.uint8)  # Convert to RGB (0-255)
+        
+        # Assign the color to all pixels belonging to the current cluster
+        colorized_image[segmented == cluster_id] = color
+    
+    return colorized_image
+
+
+
 def patch_based_kmeans(image, patch_size):
     height, width = image.shape[:2]
     patches = []
@@ -123,8 +160,14 @@ def patch_based_kmeans(image, patch_size):
             segmented[y:y+patch_size, x:x+patch_size] = label * 255
         return segmented, 2
     
+    # optimal_k = find_optimal_clusters(patches)
+    
+    optimal_k = 0
     # Find optimal number of clusters
-    optimal_k = find_optimal_clusters(patches)
+    if optimal_cluster_number != 0:
+        optimal_k = optimal_cluster_number
+    else:
+        optimal_k = find_optimal_clusters(patches)
     
     # Apply K-means clustering with optimal k
     kmeans = KMeans(n_clusters=optimal_k, random_state=42)
@@ -146,7 +189,7 @@ def patch_based_multiotsu(image, patch_size):
             patch = image[y:y+patch_size, x:x+patch_size]
             try:
                 # Increase number of bins and add error handling
-                thresholds = threshold_multiotsu(patch, nbins=256, classes=3)
+                thresholds = threshold_multiotsu(patch, nbins=256, classes=5)#min(optimal_cluster_number, 5))
                 regions = np.digitize(patch, bins=thresholds)
                 segmented[y:y+patch_size, x:x+patch_size] = regions * 85
             except ValueError:
@@ -187,6 +230,7 @@ def process_with_custom_patch():
     try:
         filename = request.form['filename']
         custom_patch_size = int(request.form['patch_size'])
+        cluster_no = int(request.form['cluster_no'])
         
         # Read the original image
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -197,14 +241,18 @@ def process_with_custom_patch():
         if len(image.shape) == 3:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         
-        # Process with custom patch size
+        # Process with custom patch size and cluster number
+        optimal_cluster_number = cluster_no
         kmeans_result, optimal_k = patch_based_kmeans(image, custom_patch_size)
         multiotsu_result = patch_based_multiotsu(image, custom_patch_size)
         threshold_result = patch_based_thresholding(image, custom_patch_size)
         
+        colorized_kmeans_result = colorize_clusters(kmeans_result, optimal_k)
+        colorized_multiotsu_result = colorize_clusters(multiotsu_result, min(optimal_cluster_number, 5))
+        
         # Save results
-        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'kmeans_result.jpg'), kmeans_result)
-        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'multiotsu_result.jpg'), multiotsu_result)
+        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'kmeans_result.jpg'), colorized_kmeans_result)
+        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'multiotsu_result.jpg'), colorized_multiotsu_result)
         cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'threshold_result.jpg'), threshold_result)
         
         # Calculate metrics
@@ -226,7 +274,7 @@ def process_with_custom_patch():
         best_method = max(metrics.items(), key=lambda x: x[1])
         
         return jsonify({
-            'optimal_k': int(optimal_k),  # Convert numpy.int64 to Python int
+            'optimal_k': int(optimal_cluster_number),  # Convert numpy.int64 to Python int
             'kmeans_metrics': kmeans_metrics,
             'multiotsu_metrics': multiotsu_metrics,
             'threshold_metrics': threshold_metrics,
@@ -273,10 +321,14 @@ def upload_file():
         kmeans_result, optimal_k = patch_based_kmeans(image, patch_size)
         multiotsu_result = patch_based_multiotsu(image, patch_size)
         threshold_result = patch_based_thresholding(image, patch_size)
+
+        # Colorize the segmented image
+        colorized_kmeans_result = colorize_clusters(kmeans_result, optimal_k)
+        colorized_multiotsu_result = colorize_clusters(multiotsu_result, min(optimal_cluster_number, 5))
         
         # Save results
-        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'kmeans_result.jpg'), kmeans_result)
-        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'multiotsu_result.jpg'), multiotsu_result)
+        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'kmeans_result.jpg'), colorized_kmeans_result)
+        cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'multiotsu_result.jpg'), colorized_multiotsu_result)
         cv2.imwrite(os.path.join(app.config['RESULTS_FOLDER'], 'threshold_result.jpg'), threshold_result)
         
         # Calculate metrics
@@ -303,10 +355,11 @@ def upload_file():
                              multiotsu_metrics=multiotsu_metrics,
                              threshold_metrics=threshold_metrics,
                              best_method=best_method[0],
-                             best_psnr=best_method[1])
+                             best_psnr=best_method[1],
+                             cluster_no=optimal_cluster_number)
     except Exception as e:
         return render_template('error.html', message=f'An error occurred: {str(e)}'), 500
 
 if __name__ == '__main__':
     #app.run(debug=True) 
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
